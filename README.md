@@ -13,3 +13,20 @@ You need the official server files before starting. Choose one:
 Copy the downloaded `Server/` directory and `Assets.zip` into your mapped `/data` folder, then start the container. You'll be prompted to log in.
 
 Enjoy
+
+
+### Docker compose
+
+```yaml
+services:
+  hytale:
+    image: ghcr.io/visualies/hytale-server:main
+    environment:
+      HYTALE_OWNER_UUID: ${HYTALE_OWNER_UUID:-}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:AOTCache=/data/Server/HytaleServer.aot -Xms8g -Xmx12g}
+    volumes:
+      - /home/docker/hytale/server/data:/data
+    ports:
+      - "5520:5520/udp"
+    restart: unless-stopped
+```
