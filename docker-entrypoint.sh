@@ -10,6 +10,7 @@ SERVER_DIR=${HYTALE_SERVER_DIR:-$DATA_DIR/Server}
 JAR_PATH=${HYTALE_SERVER_JAR:-$SERVER_DIR/HytaleServer.jar}
 AOT_PATH=${HYTALE_AOT_PATH:-$SERVER_DIR/HytaleServer.aot}
 ASSETS_PATH=${HYTALE_ASSETS_PATH:-$DATA_DIR/Assets.zip}
+MAX_MEMORY=${MAX_MEMORY:-}
 JAVA_OPTS_VALUE=${JAVA_OPTS:-}
 SESSION_FILE=${HYTALE_SESSION_FILE:-$DATA_DIR/hytale-session.json}
 HTTP_MAX_RETRIES=${HYTALE_HTTP_MAX_RETRIES:-5}
@@ -20,11 +21,17 @@ cd "$DATA_DIR"
 
 ACCESS_TOKEN=""
 REFRESH_TOKEN=""
-PROFILE_UUID="${HYTALE_OWNER_UUID:-}"
+PROFILE_UUID=""
 SESSION_TOKEN=""
 IDENTITY_TOKEN=""
 
-if [[ -z "$JAVA_OPTS_VALUE" && -f "$AOT_PATH" ]]; then
+# Build Java options from MAX_MEMORY if provided, otherwise use JAVA_OPTS
+if [[ -n "$MAX_MEMORY" ]]; then
+  JAVA_OPTS_VALUE="-Xmx${MAX_MEMORY}"
+  if [[ -f "$AOT_PATH" ]]; then
+    JAVA_OPTS_VALUE="-XX:AOTCache=${AOT_PATH} ${JAVA_OPTS_VALUE}"
+  fi
+elif [[ -z "$JAVA_OPTS_VALUE" && -f "$AOT_PATH" ]]; then
   JAVA_OPTS_VALUE="-XX:AOTCache=${AOT_PATH}"
 fi
 
@@ -70,15 +77,6 @@ request_device_code() {
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=hytale-server" \
     -d "scope=openid offline auth:server"
-}
-
-format_user_code() {
-  local code="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
-  if [[ ${#code} -eq 8 ]]; then
-    echo "${code:0:4}-${code:4:4}"
-  else
-    echo "$code"
-  fi
 }
 
 poll_for_token() {
@@ -155,7 +153,7 @@ select_profile() {
     log "No profiles available on this account"
     return 1
   fi
-  log "Selected profile ${username} (${PROFILE_UUID}). Set HYTALE_OWNER_UUID to override."
+  log "Selected profile ${username} (${PROFILE_UUID})"
   return 0
 }
 
@@ -199,17 +197,13 @@ run_device_flow() {
   local resp
   resp=$(request_device_code)
   local device_code=$(echo "$resp" | jq -r '.device_code // empty')
-  local user_code=$(echo "$resp" | jq -r '.user_code // empty')
   local verify_uri=$(echo "$resp" | jq -r '.verification_uri_complete // empty')
   local interval=$(echo "$resp" | jq -r '.interval // 5')
-  if [[ -z "$device_code" || -z "$user_code" ]]; then
+  if [[ -z "$device_code" ]]; then
     log "Failed to request device code"
     return 1
   fi
-  local formatted_code
-  formatted_code=$(format_user_code "$user_code")
   log "Visit: ${verify_uri}"
-  log "Or enter code: ${formatted_code} at https://oauth.accounts.hytale.com/oauth2/device/verify"
   if ! poll_for_token "$device_code" "$interval"; then
     return 1
   fi
@@ -226,7 +220,7 @@ attempt_auto_refresh() {
   if [[ -z "$refresh" || -z "$stored_profile" ]]; then
     return 1
   fi
-  PROFILE_UUID=${HYTALE_OWNER_UUID:-$stored_profile}
+  PROFILE_UUID=$stored_profile
   if refresh_with_token "$refresh" && create_session_tokens; then
     log "Refreshed tokens using stored credentials"
     return 0
@@ -254,8 +248,8 @@ if [[ -n "$IDENTITY_TOKEN" ]]; then
   args+=("--identity-token" "$IDENTITY_TOKEN")
 fi
 
-if [[ -n "${HYTALE_OWNER_UUID:-}" ]]; then
-  args+=("--owner-uuid" "$HYTALE_OWNER_UUID")
+if [[ -n "${PROFILE_UUID:-}" ]]; then
+  args+=("--owner-uuid" "$PROFILE_UUID")
 fi
 
 if [[ -n "${HYTALE_EXTRA_ARGS:-}" ]]; then
